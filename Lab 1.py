@@ -307,6 +307,43 @@ class GeneticAlgorithm:
         return population[0], self.max_iter  # Return best individual and max generations
 
 
+
+
+###################### section 4 ###############################
+    def one_point_crossover(parent1, parent2):
+        point = random.randint(1, len(parent1) - 1)
+        child1 = parent1[:point] + parent2[point:]
+        child2 = parent2[:point] + parent1[point:]
+        return child1, child2
+
+    def two_point_crossover(parent1, parent2):
+        point1 = random.randint(0, len(parent1) - 2)
+        point2 = random.randint(point1 + 1, len(parent1) - 1)
+
+        child1 = (
+                parent1[:point1] +
+                parent2[point1:point2] +
+                parent1[point2:]
+        )
+        child2 = (
+                parent2[:point1] +
+                parent1[point1:point2] +
+                parent2[point2:]
+        )
+        return child1, child2
+
+    def uniform_crossover(parent1, parent2, swap_prob=0.5):
+        child1, child2 = [], []
+        for gene1, gene2 in zip(parent1, parent2):
+            if random.random() < swap_prob:
+                child1.append(gene2)
+                child2.append(gene1)
+            else:
+                child1.append(gene1)
+                child2.append(gene2)
+        return child1, child2
+
+
 # Main execution
 def main():
     """Main function"""
