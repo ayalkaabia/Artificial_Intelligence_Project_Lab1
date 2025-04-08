@@ -11,13 +11,17 @@ class GeneticAlgorithm:
     """Main class for Genetic Algorithm implementation"""
 
     def __init__(self, target="Hello world!", pop_size=2048, max_iter=16384,
-                 elite_rate=0.10, mutation_rate=0.25):
+                 elite_rate=0.10, mutation_rate=0.25, crossover_type ="single", use_crossover=True, use_mutation=True):
         # Algorithm parameters
         self.target = target
         self.pop_size = pop_size
         self.max_iter = max_iter
         self.elite_rate = elite_rate
         self.mutation_rate = mutation_rate
+
+        # Added for section 6
+        self.use_crossover = use_crossover  # New parameter to enable/disable crossover
+        self.use_mutation = use_mutation  # New parameter to enable/disable mutation
 
         # Statistics tracking
         self.avg_fitness_history = []
@@ -30,6 +34,13 @@ class GeneticAlgorithm:
         self.generation_times = []
         self.generation_cpu_times = []
         self.total_elapsed_times = []
+
+        self.crossover_type = crossover_type  # Can be "single", "two", or "uniform"
+        # Validate crossover type
+        valid_crossovers = ["SINGLE", "TWO", "UNIFORM"]
+        if self.crossover_type not in valid_crossovers:
+            print(f"Warning: Invalid crossover type '{crossover_type}'. Defaulting to 'SINGLE'.")
+            self.crossover_type = "SINGLE"
 
     class Individual:
         """Represents an individual in the population (equivalent to ga_struct)"""
@@ -93,23 +104,39 @@ class GeneticAlgorithm:
     def mate(self, population, buffer):
         """Mate individuals to create the next generation"""
         esize = int(self.pop_size * self.elite_rate)
-        tsize = len(self.target)
 
         # copy top individuals (elitism)
         self.elitism(population, buffer, esize)
 
         # mate the rest
         for i in range(esize, self.pop_size):
+            # Parent selection
             i1 = random.randint(0, (self.pop_size // 2) - 1)
             i2 = random.randint(0, (self.pop_size // 2) - 1)
-            spos = random.randint(0, tsize - 1)
 
-            buffer[i].chromosome = population[i1].chromosome[:spos] + population[i2].chromosome[spos:]
+            # Get parent chromosomes
+            parent1 = population[i1].chromosome
+            parent2 = population[i2].chromosome
+
+            if self.use_crossover:
+                # Apply crossover based on selected method
+                if self.crossover_type == "SINGLE":
+                    child = self.single_point_crossover(parent1, parent2)
+                elif self.crossover_type == "TWO":
+                    child = self.two_point_crossover(parent1, parent2)
+                elif self.crossover_type == "UNIFORM":
+                    child = self.uniform_crossover(parent1, parent2)
+            else:
+                # No crossover - just copy one parent (random selection)
+                child = parent1 if random.random() < 0.5 else parent2
+
+            # Assign child to buffer
+            buffer[i].chromosome = child
             buffer[i].fitness = 0
 
-            if random.random() < self.mutation_rate:
+            # Apply mutation with probability mutation_rate
+            if self.use_mutation and random.random() < self.mutation_rate:
                 self.mutate(buffer[i])
-
 ################################### Section 1 ###################################
     def calc_population_stats(self, population, generation):
         """Calculate and output statistics for the population (Section 1)"""
@@ -248,6 +275,38 @@ class GeneticAlgorithm:
         plt.savefig('fitness_boxplot.png')
         plt.show()
 
+    ################################### Section 4 ###################################
+    # Also changed __init__ to include a crossover_type parameter, and the mate method to use the selected crossover type
+    def single_point_crossover(self, parent1, parent2):
+        """Perform single point crossover between two parents"""
+        tsize = len(self.target)
+        spos = random.randint(0, tsize - 1)
+        return parent1[:spos] + parent2[spos:]
+
+    def two_point_crossover(self, parent1, parent2):
+        """Perform two point crossover between two parents"""
+        tsize = len(self.target)
+
+        # Ensure point1 < point2
+        point1 = random.randint(0, tsize - 2)
+        point2 = random.randint(point1 + 1, tsize - 1)
+
+        # Take beginning from parent1, middle from parent2, end from parent1
+        return parent1[:point1] + parent2[point1:point2] + parent1[point2:]
+
+    def uniform_crossover(self, parent1, parent2):
+        """Perform uniform crossover between two parents"""
+        tsize = len(self.target)
+        child = ""
+
+        # For each position, randomly choose from either parent
+        for i in range(tsize):
+            if random.random() < 0.5:
+                child += parent1[i]
+            else:
+                child += parent2[i]
+
+        return child
 
     def run(self):
         """Run the genetic algorithm"""
@@ -351,7 +410,19 @@ def main():
     random.seed(int(time.time()))
 
     # Create and run the genetic algorithm
-    ga = GeneticAlgorithm()
+    #ga = GeneticAlgorithm(crossover_type = "SINGLE") # Choose one crossover type to use Can be "SINGLE", "TWO", or "UNIFORM"
+
+    # Added for section 6
+    # Configuration 1: Crossover Only
+    #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=False)
+
+    # Configuration 2: Mutation Only
+    #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=False, use_mutation=True)
+
+    # Configuration 3: Both Crossover and Mutation
+    ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True)
+
+
     best_solution, generations = ga.run()
 
     print(f"\nFinal solution: {best_solution.chromosome} with fitness {best_solution.fitness}")
