@@ -11,7 +11,7 @@ class GeneticAlgorithm:
     """Main class for Genetic Algorithm implementation"""
 
     def __init__(self, target="Hello world!", pop_size=2048, max_iter=16384,
-                 elite_rate=0.10, mutation_rate=0.25, crossover_type ="single", use_crossover=True, use_mutation=True):
+                 elite_rate=0.10, mutation_rate=0.25, crossover_type ="single", use_crossover=True, use_mutation=True, fitness_type="ORIGINAL", lcs_bonus=5):
         # Algorithm parameters
         self.target = target
         self.pop_size = pop_size
@@ -22,6 +22,10 @@ class GeneticAlgorithm:
         # Added for section 6
         self.use_crossover = use_crossover  # New parameter to enable/disable crossover
         self.use_mutation = use_mutation  # New parameter to enable/disable mutation
+
+        # Section 7
+        self.fitness_type = fitness_type  # "ORIGINAL" or "LCS"
+        self.lcs_bonus = lcs_bonus  # Bonus for exact matches in LCS (5)
 
         # Statistics tracking
         self.avg_fitness_history = []
@@ -69,14 +73,30 @@ class GeneticAlgorithm:
 
         return population, buffer
 
+    # Section 7 changes (vcreating new methods to choose from)
+    # def calc_fitness(self, population):
+    #     """Calculate fitness for all individuals in the population"""
+    #     tsize = len(self.target)
+    #     for individual in population:
+    #         fitness_val = 0
+    #         for j in range(tsize):
+    #             fitness_val += abs(ord(individual.chromosome[j]) - ord(self.target[j]))
+    #         individual.fitness = fitness_val
+    def original_fitness(self, individual_str, target_str):
+        """Original fitness calculation using character-by-character distance"""
+        fitness = 0
+        for i in range(len(target_str)):
+            fitness += abs(ord(individual_str[i]) - ord(target_str[i]))
+        return fitness
+
     def calc_fitness(self, population):
-        """Calculate fitness for all individuals in the population"""
-        tsize = len(self.target)
+        """Calculate fitness for all individuals using the selected method"""
         for individual in population:
-            fitness_val = 0
-            for j in range(tsize):
-                fitness_val += abs(ord(individual.chromosome[j]) - ord(self.target[j]))
-            individual.fitness = fitness_val
+            if self.fitness_type == "ORIGINAL":
+                individual.fitness = self.original_fitness(individual.chromosome, self.target)
+            elif self.fitness_type == "LCS":
+                individual.fitness = self.lcs_fitness(individual.chromosome, self.target, self.lcs_bonus)
+
 
     def sort_by_fitness(self, population):
         """Sort the population by fitness (ascending)"""
@@ -308,6 +328,41 @@ class GeneticAlgorithm:
 
         return child
 
+    ################################### Section 7 ###################################
+    def lcs_fitness(self, individual_str, target_str, bonus_for_match=5):
+        """
+        individual_str: The individual's chromosome, target_str: The target string, bonus_for_match: Bonus points for characters in correct positions
+        Returns: Fitness score
+        """
+        m = len(individual_str)
+        n = len(target_str)
+        # Create LCS table using dynamic programming
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        # Fill the dp table
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if individual_str[i - 1] == target_str[j - 1]:
+                    dp[i][j] = dp[i - 1][j - 1] + 1
+                else:
+                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+
+        # LCS length
+        lcs_length = dp[m][n]
+
+        # Calculate exact matches bonus
+        exact_matches = 0
+        for i in range(m):
+            if i < n and individual_str[i] == target_str[i]:
+                exact_matches += 1
+
+        # The fitness is: max possible score - (LCS length + bonus * exact matches)
+        # We subtract from the max possible score to make it a minimization problem
+        max_possible_score = len(target_str) + bonus_for_match * len(target_str)
+        fitness = max_possible_score - (lcs_length + bonus_for_match * exact_matches)
+
+        return fitness
+
+
     def run(self):
         """Run the genetic algorithm"""
         # Initialize populations
@@ -420,8 +475,9 @@ def main():
     #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=False, use_mutation=True)
 
     # Configuration 3: Both Crossover and Mutation
-    ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True)
+    #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True)
 
+    ga = GeneticAlgorithm(crossover_type="TWO", use_crossover=True, use_mutation=True, fitness_type="LCS", lcs_bonus=5)
 
     best_solution, generations = ga.run()
 
