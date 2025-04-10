@@ -46,6 +46,12 @@ class GeneticAlgorithm:
             print(f"Warning: Invalid crossover type '{crossover_type}'. Defaulting to 'SINGLE'.")
             self.crossover_type = "SINGLE"
 
+        # Adding lists to track selection pressure metrics (section 8)
+        self.fitness_variance_history = []
+        self.top_avg_ratio_history = []
+
+
+
     class Individual:
         """Represents an individual in the population (equivalent to ga_struct)"""
 
@@ -362,6 +368,93 @@ class GeneticAlgorithm:
 
         return fitness
 
+    ################################### Section 8 ###################################
+    def calculate_selection_probabilities(self, population):
+        """Calculate selection probabilities for each individual using fitness-proportionate selection"""
+        # Get all fitness values
+        fitness_values = [ind.fitness for ind in population]
+
+        # For minimization problems (like ours), we need to transform fitness values
+        # We use max_fitness + 1 - fitness so higher values are better
+        if len(set(fitness_values)) == 1:  # All fitnesses are identical
+            return [1.0 / len(population)] * len(population)
+
+        max_fitness = max(fitness_values)
+        min_fitness = min(fitness_values)
+
+        # Adjust the transformation to create more distinction
+        # If max == min, this prevents division by zero
+        if max_fitness == min_fitness:
+            transformed_fitness = [1.0] * len(fitness_values)
+        else:
+            # Use a different transformation that creates more distinction
+            transformed_fitness = [(max_fitness + 1 - fitness) / (max_fitness - min_fitness + 1)
+                                   for fitness in fitness_values]
+
+        # Calculate total fitness
+        total_fitness = sum(transformed_fitness)
+
+        # Calculate selection probabilities
+        selection_probs = [tf / total_fitness for tf in transformed_fitness]
+        return selection_probs
+
+    def calculate_fitness_variance(self, population):
+        """Calculate variance of selection probabilities (Fitness Variance)"""
+        selection_probs = self.calculate_selection_probabilities(population)
+
+        # Mean probability and Variance calculations
+        mean_prob = sum(selection_probs) / len(selection_probs)
+        variance = sum((p - mean_prob) ** 2 for p in selection_probs) / len(selection_probs)
+
+        return variance
+
+    def calculate_top_avg_ratio(self, population, top_fraction=0.1):
+        """Calculate Top-Average Selection Probability Ratio"""
+        selection_probs = self.calculate_selection_probabilities(population)
+
+        # Sort selection probabilities (higher is better)
+        sorted_probs = sorted(selection_probs, reverse=True)
+
+        # Calculate number of top individuals
+        top_count = max(1, int(len(population) * top_fraction))
+
+        # Calculate average probability for top individuals
+        top_avg = sum(sorted_probs[:top_count]) / top_count
+
+        # Calculate overall average
+        overall_avg = sum(selection_probs) / len(selection_probs)
+
+        # Calculate ratio (and also handle the division by zero)
+        if overall_avg == 0:
+            return 1.0
+
+        return top_avg / overall_avg
+
+    # Adding plotting methods to visualize selection pressure
+    def plot_selection_pressure(self):
+        """Plot selection pressure metrics over generations and calling this in the end of the run function"""
+        plt.figure(figsize=(12, 6))
+
+        generations = range(len(self.fitness_variance_history))
+
+        # Plot the two metrics
+        plt.subplot(1, 2, 1)
+        plt.plot(generations, self.fitness_variance_history, 'b-')
+        plt.title('Fitness Variance Over Generations')
+        plt.xlabel('Generation')
+        plt.ylabel('Variance of Selection Probabilities')
+        plt.grid(True)
+
+        plt.subplot(1, 2, 2)
+        plt.plot(generations, self.top_avg_ratio_history, 'r-')
+        plt.title('Top-Average Ratio Over Generations')
+        plt.xlabel('Generation')
+        plt.ylabel('Top/Avg Selection Probability Ratio')
+        plt.grid(True)
+
+        plt.tight_layout()
+        plt.savefig('selection_pressure.png')
+        plt.show()
 
     def run(self):
         """Run the genetic algorithm"""
@@ -388,6 +481,16 @@ class GeneticAlgorithm:
             # Measure and print timing (Section 2)
             self.measure_generation_time(gen_start_time, gen_start_clock, algorithm_start_time)
 
+            # Adding for section 8, Calculate and store selection pressure metrics
+            fitness_variance = self.calculate_fitness_variance(population)
+            top_avg_ratio = self.calculate_top_avg_ratio(population)
+            self.fitness_variance_history.append(fitness_variance)
+            self.top_avg_ratio_history.append(top_avg_ratio)
+            print(f"  Selection Pressure:")
+            print(f"    Fitness Variance: {fitness_variance:.10f}")
+            print(f"    Top-Avg Ratio: {top_avg_ratio:.6f}")
+
+
             # Print best individual
             self.print_best(population)
 
@@ -400,6 +503,8 @@ class GeneticAlgorithm:
                 # Generate plots (added for Section 3)
                 self.plot_fitness_history()
                 self.plot_fitness_boxplot()
+
+                self.plot_selection_pressure()
 
                 return population[0], i + 1  # Return best individual and generations
 
@@ -416,6 +521,9 @@ class GeneticAlgorithm:
         # Always generate plots(added for Section 3)
         self.plot_fitness_history()
         self.plot_fitness_boxplot()
+
+        # Generate plots section 8
+        self.plot_selection_pressure()
 
 
         return population[0], self.max_iter  # Return best individual and max generations
@@ -440,7 +548,8 @@ def main():
     # Configuration 3: Both Crossover and Mutation
     #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True)
 
-    ga = GeneticAlgorithm(crossover_type="TWO", use_crossover=True, use_mutation=True, fitness_type="LCS", lcs_bonus=5)
+    ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True, fitness_type="ORIGINAL")
+    #ga = GeneticAlgorithm(crossover_type="TWO", use_crossover=True, use_mutation=True, fitness_type="LCS", lcs_bonus=5)
 
     best_solution, generations = ga.run()
 
