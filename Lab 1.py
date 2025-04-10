@@ -4,6 +4,8 @@ import math
 import datetime
 import matplotlib.pyplot as plt
 import numpy as np
+from collections import Counter
+from math import log2
 
 
 
@@ -27,6 +29,11 @@ class GeneticAlgorithm:
         self.fitness_type = fitness_type  # "ORIGINAL" or "LCS"
         self.lcs_bonus = lcs_bonus  # Bonus for exact matches in LCS (5)
 
+        # For Section 9 - Genetic Diversity Tracking
+        self.hamming_history = []
+        self.alleles_history = []
+        self.entropy_history = []
+
         # Statistics tracking
         self.avg_fitness_history = []
         self.std_dev_history = []
@@ -38,6 +45,8 @@ class GeneticAlgorithm:
         self.generation_times = []
         self.generation_cpu_times = []
         self.total_elapsed_times = []
+
+
 
         self.crossover_type = crossover_type  # Can be "single", "two", or "uniform"
         # Validate crossover type
@@ -362,6 +371,79 @@ class GeneticAlgorithm:
 
         return fitness
 
+    ########################## SECTION 9 ############################
+
+    def calculate_avg_hamming_distance(self, population):
+        """Calculate the average pairwise Hamming distance in the population"""
+        chromosomes = [ind.chromosome for ind in population]
+        num_individuals = len(chromosomes)
+
+        total_distance = 0
+        comparisons = 0
+        for i in range(num_individuals):
+            for j in range(i + 1, num_individuals):
+                dist = sum(c1 != c2 for c1, c2 in zip(chromosomes[i], chromosomes[j]))
+                total_distance += dist
+                comparisons += 1
+
+        return total_distance / comparisons if comparisons else 0
+
+    def calculate_avg_alleles_per_position(self, population):
+        """Calculate the average number of unique alleles (characters) per gene position"""
+        chromo_length = len(population[0].chromosome)
+        allele_counts = []
+
+        for pos in range(chromo_length):
+            unique_chars = set(ind.chromosome[pos] for ind in population)
+            allele_counts.append(len(unique_chars))
+
+        return sum(allele_counts) / chromo_length
+    def calculate_avg_shannon_entropy(self, population):
+        """Calculate the average Shannon entropy per gene position"""
+        chromo_length = len(population[0].chromosome)
+        entropy_sum = 0
+
+        for pos in range(chromo_length):
+            freq = Counter(ind.chromosome[pos] for ind in population)
+            total = sum(freq.values())
+            entropy = -sum((count / total) * log2(count / total) for count in freq.values())
+            entropy_sum += entropy
+
+        return entropy_sum / chromo_length
+
+    def report_genetic_diversity(self, population, generation):
+        """Call all diversity metrics, store them, and print them"""
+        hamming = self.calculate_avg_hamming_distance(population)
+        alleles = self.calculate_avg_alleles_per_position(population)
+        entropy = self.calculate_avg_shannon_entropy(population)
+
+        self.hamming_history.append(hamming)
+        self.alleles_history.append(alleles)
+        self.entropy_history.append(entropy)
+
+        print(f"  Genetic Diversity (Generation {generation}):")
+        print(f"    Avg Hamming Distance: {hamming:.4f}")
+        print(f"    Avg Alleles per Position: {alleles:.2f}")
+        print(f"    Avg Shannon Entropy: {entropy:.4f}")
+
+    def plot_diversity_metrics(self):
+        """Plot and save diversity metrics over generations"""
+        generations = range(len(self.hamming_history))
+
+        plt.figure(figsize=(12, 6))
+
+        plt.plot(generations, self.hamming_history, label="Avg Hamming Distance", color="purple")
+        plt.plot(generations, self.alleles_history, label="Avg Alleles per Position", color="orange")
+        plt.plot(generations, self.entropy_history, label="Avg Shannon Entropy", color="teal")
+
+        plt.title("Genetic Diversity Metrics Over Generations")
+        plt.xlabel("Generation")
+        plt.ylabel("Value")
+        plt.legend()
+        plt.grid(True)
+
+        plt.savefig("genetic_diversity_metrics.png")
+        plt.show()
 
     def run(self):
         """Run the genetic algorithm"""
@@ -384,6 +466,8 @@ class GeneticAlgorithm:
 
             # Calculate and print statistics (Section 1)
             self.calc_population_stats(population, i)
+            #Report Genetic Diversity (Section 9)
+            self.report_genetic_diversity(population, i)
 
             # Measure and print timing (Section 2)
             self.measure_generation_time(gen_start_time, gen_start_clock, algorithm_start_time)
@@ -400,6 +484,7 @@ class GeneticAlgorithm:
                 # Generate plots (added for Section 3)
                 self.plot_fitness_history()
                 self.plot_fitness_boxplot()
+                self.plot_diversity_metrics()
 
                 return population[0], i + 1  # Return best individual and generations
 
@@ -416,46 +501,9 @@ class GeneticAlgorithm:
         # Always generate plots(added for Section 3)
         self.plot_fitness_history()
         self.plot_fitness_boxplot()
-
+        self.plot_diversity_metrics()
 
         return population[0], self.max_iter  # Return best individual and max generations
-
-
-
-
-###################### section 4 ###############################
-    def one_point_crossover(parent1, parent2):
-        point = random.randint(1, len(parent1) - 1)
-        child1 = parent1[:point] + parent2[point:]
-        child2 = parent2[:point] + parent1[point:]
-        return child1, child2
-
-    def two_point_crossover(parent1, parent2):
-        point1 = random.randint(0, len(parent1) - 2)
-        point2 = random.randint(point1 + 1, len(parent1) - 1)
-
-        child1 = (
-                parent1[:point1] +
-                parent2[point1:point2] +
-                parent1[point2:]
-        )
-        child2 = (
-                parent2[:point1] +
-                parent1[point1:point2] +
-                parent2[point2:]
-        )
-        return child1, child2
-
-    def uniform_crossover(parent1, parent2, swap_prob=0.5):
-        child1, child2 = [], []
-        for gene1, gene2 in zip(parent1, parent2):
-            if random.random() < swap_prob:
-                child1.append(gene2)
-                child2.append(gene1)
-            else:
-                child1.append(gene1)
-                child2.append(gene2)
-        return child1, child2
 
 
 # Main execution
@@ -477,7 +525,7 @@ def main():
     # Configuration 3: Both Crossover and Mutation
     #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True)
 
-    ga = GeneticAlgorithm(crossover_type="TWO", use_crossover=True, use_mutation=True, fitness_type="LCS", lcs_bonus=5)
+    ga = GeneticAlgorithm(crossover_type="TWO", use_crossover=True, use_mutation=False, fitness_type="LCS", lcs_bonus=5)
 
     best_solution, generations = ga.run()
 
