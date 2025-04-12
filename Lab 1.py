@@ -91,9 +91,12 @@ class GeneticAlgorithm:
     """Main class for Genetic Algorithm implementation"""
 
     def __init__(self, target="Hello world!", pop_size=2048, max_iter=16384,
+
                  elite_rate=0.10, mutation_rate=0.25, crossover_type="single",
                  use_crossover=True, use_mutation=True, fitness_type="ORIGINAL",
                  lcs_bonus=5, selection_method="RWS", use_elitism=True, k=3, p=0.8):
+
+ 
         # Algorithm parameters
         self.target = target
         self.pop_size = pop_size
@@ -109,6 +112,7 @@ class GeneticAlgorithm:
         self.fitness_type = fitness_type  # "ORIGINAL" or "LCS"
         self.lcs_bonus = lcs_bonus  # Bonus for exact matches in LCS (5)
 
+
         # For Section 9 - Genetic Diversity Tracking
         self.hamming_history = []
         self.alleles_history = []
@@ -120,6 +124,8 @@ class GeneticAlgorithm:
         self.k = k  # Tournament selection size
         self.p = p  # Probability for non-deterministic tournament
         self.use_elitism = use_elitism  # Set whether elitism is used or not
+
+
 
         # Statistics tracking
         self.avg_fitness_history = []
@@ -139,6 +145,14 @@ class GeneticAlgorithm:
         if self.crossover_type not in valid_crossovers:
             print(f"Warning: Invalid crossover type '{crossover_type}'. Defaulting to 'SINGLE'.")
             self.crossover_type = "SINGLE"
+
+
+
+        # Adding lists to track selection pressure metrics (section 8)
+        self.fitness_variance_history = []
+        self.top_avg_ratio_history = []
+
+
 
 
     class Individual:
@@ -169,6 +183,18 @@ class GeneticAlgorithm:
 
         return population, buffer
 
+
+
+
+    # Section 7 changes (vcreating new methods to choose from)
+    # def calc_fitness(self, population):
+    #     """Calculate fitness for all individuals in the population"""
+    #     tsize = len(self.target)
+    #     for individual in population:
+    #         fitness_val = 0
+    #         for j in range(tsize):
+    #             fitness_val += abs(ord(individual.chromosome[j]) - ord(self.target[j]))
+    #         individual.fitness = fitness_val
 
     def original_fitness(self, individual_str, target_str):
         """Original fitness calculation using character-by-character distance"""
@@ -214,6 +240,7 @@ class GeneticAlgorithm:
         member.chromosome = "".join(chars)
 
     def mate(self, population, buffer):
+
         """Mate individuals to create the next generation with flexible selection"""
         fitness_values = [ind.fitness for ind in population]
 
@@ -284,7 +311,8 @@ class GeneticAlgorithm:
             if self.use_mutation and random.random() < self.mutation_rate:
                 self.mutate(buffer[i + 1])
 
-    ################################### Section 1 ###################################
+################################### Section 1 ###################################
+
     def calc_population_stats(self, population, generation):
         """Calculate and output statistics for the population (Section 1)"""
         best_fitness = population[0].fitness
@@ -489,6 +517,7 @@ class GeneticAlgorithm:
 
         return fitness
 
+
     ########################## SECTION 9 ############################
 
     def calculate_avg_hamming_distance(self, population):
@@ -564,6 +593,95 @@ class GeneticAlgorithm:
         plt.show()
 
 
+    ################################### Section 8 ###################################
+    def calculate_selection_probabilities(self, population):
+        """Calculate selection probabilities for each individual using fitness-proportionate selection"""
+        # Get all fitness values
+        fitness_values = [ind.fitness for ind in population]
+
+        # For minimization problems (like ours), we need to transform fitness values
+        # We use max_fitness + 1 - fitness so higher values are better
+        if len(set(fitness_values)) == 1:  # All fitnesses are identical
+            return [1.0 / len(population)] * len(population)
+
+        max_fitness = max(fitness_values)
+        min_fitness = min(fitness_values)
+
+        # Adjust the transformation to create more distinction
+        # If max == min, this prevents division by zero
+        if max_fitness == min_fitness:
+            transformed_fitness = [1.0] * len(fitness_values)
+        else:
+            # Use a different transformation that creates more distinction
+            transformed_fitness = [(max_fitness + 1 - fitness) / (max_fitness - min_fitness + 1)
+                                   for fitness in fitness_values]
+
+        # Calculate total fitness
+        total_fitness = sum(transformed_fitness)
+
+        # Calculate selection probabilities
+        selection_probs = [tf / total_fitness for tf in transformed_fitness]
+        return selection_probs
+
+    def calculate_fitness_variance(self, population):
+        """Calculate variance of selection probabilities (Fitness Variance)"""
+        selection_probs = self.calculate_selection_probabilities(population)
+
+        # Mean probability and Variance calculations
+        mean_prob = sum(selection_probs) / len(selection_probs)
+        variance = sum((p - mean_prob) ** 2 for p in selection_probs) / len(selection_probs)
+
+        return variance
+
+    def calculate_top_avg_ratio(self, population, top_fraction=0.1):
+        """Calculate Top-Average Selection Probability Ratio"""
+        selection_probs = self.calculate_selection_probabilities(population)
+
+        # Sort selection probabilities (higher is better)
+        sorted_probs = sorted(selection_probs, reverse=True)
+
+        # Calculate number of top individuals
+        top_count = max(1, int(len(population) * top_fraction))
+
+        # Calculate average probability for top individuals
+        top_avg = sum(sorted_probs[:top_count]) / top_count
+
+        # Calculate overall average
+        overall_avg = sum(selection_probs) / len(selection_probs)
+
+        # Calculate ratio (and also handle the division by zero)
+        if overall_avg == 0:
+            return 1.0
+
+        return top_avg / overall_avg
+
+    # Adding plotting methods to visualize selection pressure
+    def plot_selection_pressure(self):
+        """Plot selection pressure metrics over generations and calling this in the end of the run function"""
+        plt.figure(figsize=(12, 6))
+
+        generations = range(len(self.fitness_variance_history))
+
+        # Plot the two metrics
+        plt.subplot(1, 2, 1)
+        plt.plot(generations, self.fitness_variance_history, 'b-')
+        plt.title('Fitness Variance Over Generations')
+        plt.xlabel('Generation')
+        plt.ylabel('Variance of Selection Probabilities')
+        plt.grid(True)
+
+        plt.subplot(1, 2, 2)
+        plt.plot(generations, self.top_avg_ratio_history, 'r-')
+        plt.title('Top-Average Ratio Over Generations')
+        plt.xlabel('Generation')
+        plt.ylabel('Top/Avg Selection Probability Ratio')
+        plt.grid(True)
+
+        plt.tight_layout()
+        plt.savefig('selection_pressure.png')
+        plt.show()
+
+
     def run(self):
         """Run the genetic algorithm"""
         # Initialize populations
@@ -591,6 +709,16 @@ class GeneticAlgorithm:
             # Measure and print timing (Section 2)
             self.measure_generation_time(gen_start_time, gen_start_clock, algorithm_start_time)
 
+            # Adding for section 8, Calculate and store selection pressure metrics
+            fitness_variance = self.calculate_fitness_variance(population)
+            top_avg_ratio = self.calculate_top_avg_ratio(population)
+            self.fitness_variance_history.append(fitness_variance)
+            self.top_avg_ratio_history.append(top_avg_ratio)
+            print(f"  Selection Pressure:")
+            print(f"    Fitness Variance: {fitness_variance:.10f}")
+            print(f"    Top-Avg Ratio: {top_avg_ratio:.6f}")
+
+
             # Print best individual
             self.print_best(population)
 
@@ -604,6 +732,8 @@ class GeneticAlgorithm:
                 self.plot_fitness_history()
                 self.plot_fitness_boxplot()
                 self.plot_diversity_metrics()
+
+                self.plot_selection_pressure()
 
                 return population[0], i + 1  # Return best individual and generations
 
@@ -620,7 +750,14 @@ class GeneticAlgorithm:
         # Always generate plots(added for Section 3)
         self.plot_fitness_history()
         self.plot_fitness_boxplot()
+
         self.plot_diversity_metrics()
+
+
+        # Generate plots section 8
+        self.plot_selection_pressure()
+
+
 
         return population[0], self.max_iter  # Return best individual and max generations
 
@@ -631,43 +768,63 @@ def main():
     # Set random seed
     random.seed(int(time.time()))
 
+    # Section 9 TESTS:
     # Parent selection methods and elitism flag combinations
-    selection_methods = ["RWS", "SUS", "TOURNAMENT", "NONDET_TOURNAMENT"]
-    elitism_options = [True,False]
+#     selection_methods = ["RWS", "SUS", "TOURNAMENT", "NONDET_TOURNAMENT"]
+#     elitism_options = [True,False]
 
-    # Track results for different configurations
-    results = []
+#     # Track results for different configurations
+#     results = []
 
-    for selection_method in selection_methods:
-        for use_elitism in elitism_options:
-            # Create the genetic algorithm with the current configuration
-            ga = GeneticAlgorithm(
-                crossover_type="TWO",  # You can change this based on your experiment
-                use_crossover=True,
-                use_mutation=True,
-                fitness_type="LCS",
-                lcs_bonus=5,
-                selection_method=selection_method,
-                use_elitism=use_elitism
-            )
+#     for selection_method in selection_methods:
+#         for use_elitism in elitism_options:
+#             # Create the genetic algorithm with the current configuration
+#             ga = GeneticAlgorithm(
+#                 crossover_type="TWO",  # You can change this based on your experiment
+#                 use_crossover=True,
+#                 use_mutation=True,
+#                 fitness_type="LCS",
+#                 lcs_bonus=5,
+#                 selection_method=selection_method,
+#                 use_elitism=use_elitism
+#             )
 
-            # Run the genetic algorithm
-            best_solution, generations = ga.run()
+#             # Run the genetic algorithm
+#             best_solution, generations = ga.run()
 
-            # Store the results
-            results.append({
-                "selection_method": selection_method,
-                "use_elitism": use_elitism,
-                "best_solution": best_solution.chromosome,
-                "fitness": best_solution.fitness,
-                "generations": generations
-            })
+#             # Store the results
+#             results.append({
+#                 "selection_method": selection_method,
+#                 "use_elitism": use_elitism,
+#                 "best_solution": best_solution.chromosome,
+#                 "fitness": best_solution.fitness,
+#                 "generations": generations
+#             })
 
-    # Print the results
-    for result in results:
-        print(f"\nSelection Method: {result['selection_method']}, Elitism: {result['use_elitism']}")
-        print(f"Best Solution: {result['best_solution']} with fitness {result['fitness']}")
-        print(f"Generations: {result['generations']}")
+#     # Print the results
+#     for result in results:
+#         print(f"\nSelection Method: {result['selection_method']}, Elitism: {result['use_elitism']}")
+#         print(f"Best Solution: {result['best_solution']} with fitness {result['fitness']}")
+#         print(f"Generations: {result['generations']}")
+
+    # Create and run the genetic algorithm
+    #ga = GeneticAlgorithm(crossover_type = "SINGLE") # Choose one crossover type to use Can be "SINGLE", "TWO", or "UNIFORM"
+
+    # Added for section 6
+    # Configuration 1: Crossover Only
+    #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=False)
+
+    # Configuration 2: Mutation Only
+    #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=False, use_mutation=True)
+
+    # Configuration 3: Both Crossover and Mutation
+    #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True)
+
+    ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True, fitness_type="ORIGINAL",selection_methods="SUS", use_elitism=True)
+    #ga = GeneticAlgorithm(crossover_type="TWO", use_crossover=True, use_mutation=True, fitness_type="LCS", lcs_bonus=5)
+
+    best_solution, generations = ga.run()
+
 
     return 0
 
