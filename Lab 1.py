@@ -4,14 +4,99 @@ import math
 import datetime
 import matplotlib.pyplot as plt
 import numpy as np
+from collections import Counter
+from math import log2
+
+def apply_aging(population, fitness_values, aging_factor):
+    return [f + ind.age * aging_factor for ind, f in zip(population, fitness_values)]
+
+def roulette_wheel_selection(population, fitness_values, num_parents, use_linear_scaling=True, aging_factor=0.0):
+    if aging_factor > 0:
+        fitness_values = apply_aging(population, fitness_values, aging_factor)
+
+    if use_linear_scaling:
+        fitness_values = linear_scaling(fitness_values)
+
+    max_fitness = max(fitness_values) + 1
+    scaled_fitness = [max_fitness - f for f in fitness_values]
+    total_fitness = sum(scaled_fitness)
+
+    selected = []
+    for _ in range(num_parents):
+        pick = random.uniform(0, total_fitness)
+        current = 0
+        for ind, f in zip(population, scaled_fitness):
+            current += f
+            if current >= pick:
+                selected.append(ind)
+                break
+    return selected
+
+
+def stochastic_universal_sampling(population, fitness_values, num_parents, use_linear_scaling=True, aging_factor=0.0):
+    if aging_factor > 0:
+        fitness_values = apply_aging(population, fitness_values, aging_factor)
+
+    if use_linear_scaling:
+        fitness_values = linear_scaling(fitness_values)
+
+    max_fitness = max(fitness_values) + 1
+    scaled_fitness = [max_fitness - f for f in fitness_values]
+    total_fitness = sum(scaled_fitness)
+
+    point_distance = total_fitness / num_parents
+    start_point = random.uniform(0, point_distance)
+    points = [start_point + i * point_distance for i in range(num_parents)]
+
+    selected = []
+    cumulative_sum = 0
+    index = 0
+    for point in points:
+        while cumulative_sum < point:
+            cumulative_sum += scaled_fitness[index]
+            index += 1
+        selected.append(population[index - 1])
+    return selected
+
+def deterministic_tournament_selection(population, num_parents, k, aging_factor=0.0):
+    selected = []
+    for _ in range(num_parents):
+        tournament = random.sample(population, k)
+        winner = min(tournament, key=lambda x: x.fitness + x.age * aging_factor)
+        selected.append(winner)
+    return selected
+
+def non_deterministic_tournament_selection(population, num_parents, k, p, aging_factor=0.0):
+    selected = []
+    for _ in range(num_parents):
+        tournament = random.sample(population, k)
+        tournament.sort(key=lambda x: x.fitness + x.age * aging_factor)  # Best first
+        for i in range(k):
+            if random.random() < p or i == k - 1:
+                selected.append(tournament[i])
+                break
+    return selected
 
 
 
+def linear_scaling(fitness_values, c=1.5):
+    """
+    Applies linear scaling to fitness values.
+    Shifts the scale to avoid negative or small values.
+    """
+    f_min = min(fitness_values)
+    f_avg = sum(fitness_values) / len(fitness_values)
+    return [c * f + (1 - c) * f_avg for f in fitness_values]
 class GeneticAlgorithm:
     """Main class for Genetic Algorithm implementation"""
 
     def __init__(self, target="Hello world!", pop_size=2048, max_iter=16384,
-                 elite_rate=0.10, mutation_rate=0.25, crossover_type ="single", use_crossover=True, use_mutation=True, fitness_type="ORIGINAL", lcs_bonus=5):
+
+                 elite_rate=0.10, mutation_rate=0.25, crossover_type="single",
+                 use_crossover=True, use_mutation=True, fitness_type="ORIGINAL",
+                 lcs_bonus=5, selection_method="RWS", use_elitism=True, k=3, p=0.8):
+
+ 
         # Algorithm parameters
         self.target = target
         self.pop_size = pop_size
@@ -26,6 +111,21 @@ class GeneticAlgorithm:
         # Section 7
         self.fitness_type = fitness_type  # "ORIGINAL" or "LCS"
         self.lcs_bonus = lcs_bonus  # Bonus for exact matches in LCS (5)
+
+
+        # For Section 9 - Genetic Diversity Tracking
+        self.hamming_history = []
+        self.alleles_history = []
+        self.entropy_history = []
+
+        # For Section 10 - Parent Selection
+        self.aging_factor=0.5
+        self.selection_method = selection_method  # Use the passed parameter
+        self.k = k  # Tournament selection size
+        self.p = p  # Probability for non-deterministic tournament
+        self.use_elitism = use_elitism  # Set whether elitism is used or not
+
+
 
         # Statistics tracking
         self.avg_fitness_history = []
@@ -46,9 +146,12 @@ class GeneticAlgorithm:
             print(f"Warning: Invalid crossover type '{crossover_type}'. Defaulting to 'SINGLE'.")
             self.crossover_type = "SINGLE"
 
+
+
         # Adding lists to track selection pressure metrics (section 8)
         self.fitness_variance_history = []
         self.top_avg_ratio_history = []
+
 
 
 
@@ -58,6 +161,7 @@ class GeneticAlgorithm:
         def __init__(self, chromosome=""):
             self.chromosome = chromosome  # String representation
             self.fitness = 0  # Fitness value
+            self.age=0
 
         def __str__(self):
             return f"{self.chromosome} (Fitness: {self.fitness})"
@@ -79,6 +183,9 @@ class GeneticAlgorithm:
 
         return population, buffer
 
+
+
+
     # Section 7 changes (vcreating new methods to choose from)
     # def calc_fitness(self, population):
     #     """Calculate fitness for all individuals in the population"""
@@ -88,6 +195,7 @@ class GeneticAlgorithm:
     #         for j in range(tsize):
     #             fitness_val += abs(ord(individual.chromosome[j]) - ord(self.target[j]))
     #         individual.fitness = fitness_val
+
     def original_fitness(self, individual_str, target_str):
         """Original fitness calculation using character-by-character distance"""
         fitness = 0
@@ -107,6 +215,10 @@ class GeneticAlgorithm:
     def sort_by_fitness(self, population):
         """Sort the population by fitness (ascending)"""
         population.sort(key=lambda x: x.fitness)
+
+    def adjusted_fitness(self, individual, aging_factor=0.5):
+        """Reduce fitness of older individuals."""
+        return individual.fitness + individual.age * aging_factor
 
     def elitism(self, population, buffer, esize):
         """Preserve the best individuals"""
@@ -128,42 +240,79 @@ class GeneticAlgorithm:
         member.chromosome = "".join(chars)
 
     def mate(self, population, buffer):
-        """Mate individuals to create the next generation"""
-        esize = int(self.pop_size * self.elite_rate)
 
-        # copy top individuals (elitism)
-        self.elitism(population, buffer, esize)
+        """Mate individuals to create the next generation with flexible selection"""
+        fitness_values = [ind.fitness for ind in population]
 
-        # mate the rest
-        for i in range(esize, self.pop_size):
-            # Parent selection
-            i1 = random.randint(0, (self.pop_size // 2) - 1)
-            i2 = random.randint(0, (self.pop_size // 2) - 1)
+        for ind in population:
+            ind.age+=1
+        if self.use_elitism:
+            esize = int(self.pop_size * self.elite_rate)
+            self.elitism(population, buffer, esize)
+            num_offspring = self.pop_size - esize
+        else:
+            esize = 0
+            num_offspring = self.pop_size
+        # Parent selection with aging
+        if self.selection_method == "RWS":
+            parents = roulette_wheel_selection(
+                population, fitness_values, num_offspring,
+                use_linear_scaling=True,
+                aging_factor=self.aging_factor
+            )
+        elif self.selection_method == "SUS":
+            parents = stochastic_universal_sampling(
+                population, fitness_values, num_offspring,
+                use_linear_scaling=True,
+                aging_factor=self.aging_factor
+            )
+        elif self.selection_method == "TOURNAMENT":
+            parents = deterministic_tournament_selection(
+                population, num_offspring, self.k,
+                aging_factor=self.aging_factor
+            )
+        elif self.selection_method == "NONDET_TOURNAMENT":
+            parents = non_deterministic_tournament_selection(
+                population, num_offspring, self.k, self.p,
+                aging_factor=self.aging_factor
+            )
+        else:
+            raise ValueError(f"Unknown selection method: {self.selection_method}")
 
-            # Get parent chromosomes
-            parent1 = population[i1].chromosome
-            parent2 = population[i2].chromosome
+        # Generate offspring
+        for i in range(esize, self.pop_size, 2):
+            p1 = parents[i - esize]
+            p2 = parents[(i - esize + 1) % len(parents)]
 
+            # Crossover
             if self.use_crossover:
-                # Apply crossover based on selected method
                 if self.crossover_type == "SINGLE":
-                    child = self.single_point_crossover(parent1, parent2)
+                    child1 = self.single_point_crossover(p1.chromosome, p2.chromosome)
+                    child2 = self.single_point_crossover(p2.chromosome, p1.chromosome)
                 elif self.crossover_type == "TWO":
-                    child = self.two_point_crossover(parent1, parent2)
+                    child1 = self.two_point_crossover(p1.chromosome, p2.chromosome)
+                    child2 = self.two_point_crossover(p2.chromosome, p1.chromosome)
                 elif self.crossover_type == "UNIFORM":
-                    child = self.uniform_crossover(parent1, parent2)
+                    child1 = self.uniform_crossover(p1.chromosome, p2.chromosome)
+                    child2 = self.uniform_crossover(p2.chromosome, p1.chromosome)
+                else:
+                    child1 = p1.chromosome
+                    child2 = p2.chromosome
             else:
-                # No crossover - just copy one parent (random selection)
-                child = parent1 if random.random() < 0.5 else parent2
+                child1 = p1.chromosome
+                child2 = p2.chromosome
 
-            # Assign child to buffer
-            buffer[i].chromosome = child
-            buffer[i].fitness = 0
+            buffer[i].chromosome = child1
+            buffer[i + 1].chromosome = child2
 
-            # Apply mutation with probability mutation_rate
+            # Mutation
             if self.use_mutation and random.random() < self.mutation_rate:
                 self.mutate(buffer[i])
+            if self.use_mutation and random.random() < self.mutation_rate:
+                self.mutate(buffer[i + 1])
+
 ################################### Section 1 ###################################
+
     def calc_population_stats(self, population, generation):
         """Calculate and output statistics for the population (Section 1)"""
         best_fitness = population[0].fitness
@@ -368,6 +517,82 @@ class GeneticAlgorithm:
 
         return fitness
 
+
+    ########################## SECTION 9 ############################
+
+    def calculate_avg_hamming_distance(self, population):
+        """Calculate the average pairwise Hamming distance in the population"""
+        chromosomes = [ind.chromosome for ind in population]
+        num_individuals = len(chromosomes)
+
+        total_distance = 0
+        comparisons = 0
+        for i in range(num_individuals):
+            for j in range(i + 1, num_individuals):
+                dist = sum(c1 != c2 for c1, c2 in zip(chromosomes[i], chromosomes[j]))
+                total_distance += dist
+                comparisons += 1
+
+        return total_distance / comparisons if comparisons else 0
+
+    def calculate_avg_alleles_per_position(self, population):
+        """Calculate the average number of unique alleles (characters) per gene position"""
+        chromo_length = len(population[0].chromosome)
+        allele_counts = []
+
+        for pos in range(chromo_length):
+            unique_chars = set(ind.chromosome[pos] for ind in population)
+            allele_counts.append(len(unique_chars))
+
+        return sum(allele_counts) / chromo_length
+    def calculate_avg_shannon_entropy(self, population):
+        """Calculate the average Shannon entropy per gene position"""
+        chromo_length = len(population[0].chromosome)
+        entropy_sum = 0
+
+        for pos in range(chromo_length):
+            freq = Counter(ind.chromosome[pos] for ind in population)
+            total = sum(freq.values())
+            entropy = -sum((count / total) * log2(count / total) for count in freq.values())
+            entropy_sum += entropy
+
+        return entropy_sum / chromo_length
+
+    def report_genetic_diversity(self, population, generation):
+        """Call all diversity metrics, store them, and print them"""
+        hamming = self.calculate_avg_hamming_distance(population)
+        alleles = self.calculate_avg_alleles_per_position(population)
+        entropy = self.calculate_avg_shannon_entropy(population)
+
+        self.hamming_history.append(hamming)
+        self.alleles_history.append(alleles)
+        self.entropy_history.append(entropy)
+
+        print(f"  Genetic Diversity (Generation {generation}):")
+        print(f"    Avg Hamming Distance: {hamming:.4f}")
+        print(f"    Avg Alleles per Position: {alleles:.2f}")
+        print(f"    Avg Shannon Entropy: {entropy:.4f}")
+
+    def plot_diversity_metrics(self):
+        """Plot and save diversity metrics over generations"""
+        generations = range(len(self.hamming_history))
+
+        plt.figure(figsize=(12, 6))
+
+        plt.plot(generations, self.hamming_history, label="Avg Hamming Distance", color="purple")
+        plt.plot(generations, self.alleles_history, label="Avg Alleles per Position", color="orange")
+        plt.plot(generations, self.entropy_history, label="Avg Shannon Entropy", color="teal")
+
+        plt.title("Genetic Diversity Metrics Over Generations")
+        plt.xlabel("Generation")
+        plt.ylabel("Value")
+        plt.legend()
+        plt.grid(True)
+
+        plt.savefig("genetic_diversity_metrics.png")
+        plt.show()
+
+
     ################################### Section 8 ###################################
     def calculate_selection_probabilities(self, population):
         """Calculate selection probabilities for each individual using fitness-proportionate selection"""
@@ -456,6 +681,7 @@ class GeneticAlgorithm:
         plt.savefig('selection_pressure.png')
         plt.show()
 
+
     def run(self):
         """Run the genetic algorithm"""
         # Initialize populations
@@ -477,6 +703,8 @@ class GeneticAlgorithm:
 
             # Calculate and print statistics (Section 1)
             self.calc_population_stats(population, i)
+            #Report Genetic Diversity (Section 9)
+            self.report_genetic_diversity(population, i)
 
             # Measure and print timing (Section 2)
             self.measure_generation_time(gen_start_time, gen_start_clock, algorithm_start_time)
@@ -503,6 +731,7 @@ class GeneticAlgorithm:
                 # Generate plots (added for Section 3)
                 self.plot_fitness_history()
                 self.plot_fitness_boxplot()
+                self.plot_diversity_metrics()
 
                 self.plot_selection_pressure()
 
@@ -522,8 +751,12 @@ class GeneticAlgorithm:
         self.plot_fitness_history()
         self.plot_fitness_boxplot()
 
+        self.plot_diversity_metrics()
+
+
         # Generate plots section 8
         self.plot_selection_pressure()
+
 
 
         return population[0], self.max_iter  # Return best individual and max generations
@@ -534,6 +767,45 @@ def main():
     """Main function"""
     # Set random seed
     random.seed(int(time.time()))
+
+    # Section 9 TESTS:
+    # Parent selection methods and elitism flag combinations
+#     selection_methods = ["RWS", "SUS", "TOURNAMENT", "NONDET_TOURNAMENT"]
+#     elitism_options = [True,False]
+
+#     # Track results for different configurations
+#     results = []
+
+#     for selection_method in selection_methods:
+#         for use_elitism in elitism_options:
+#             # Create the genetic algorithm with the current configuration
+#             ga = GeneticAlgorithm(
+#                 crossover_type="TWO",  # You can change this based on your experiment
+#                 use_crossover=True,
+#                 use_mutation=True,
+#                 fitness_type="LCS",
+#                 lcs_bonus=5,
+#                 selection_method=selection_method,
+#                 use_elitism=use_elitism
+#             )
+
+#             # Run the genetic algorithm
+#             best_solution, generations = ga.run()
+
+#             # Store the results
+#             results.append({
+#                 "selection_method": selection_method,
+#                 "use_elitism": use_elitism,
+#                 "best_solution": best_solution.chromosome,
+#                 "fitness": best_solution.fitness,
+#                 "generations": generations
+#             })
+
+#     # Print the results
+#     for result in results:
+#         print(f"\nSelection Method: {result['selection_method']}, Elitism: {result['use_elitism']}")
+#         print(f"Best Solution: {result['best_solution']} with fitness {result['fitness']}")
+#         print(f"Generations: {result['generations']}")
 
     # Create and run the genetic algorithm
     #ga = GeneticAlgorithm(crossover_type = "SINGLE") # Choose one crossover type to use Can be "SINGLE", "TWO", or "UNIFORM"
@@ -548,14 +820,14 @@ def main():
     # Configuration 3: Both Crossover and Mutation
     #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True)
 
-    ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True, fitness_type="ORIGINAL")
+    ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True, fitness_type="ORIGINAL",selection_methods="SUS", use_elitism=True)
     #ga = GeneticAlgorithm(crossover_type="TWO", use_crossover=True, use_mutation=True, fitness_type="LCS", lcs_bonus=5)
 
     best_solution, generations = ga.run()
 
-    print(f"\nFinal solution: {best_solution.chromosome} with fitness {best_solution.fitness}")
-    print(f"Found in {generations} generations")
+
     return 0
+
 
 
 # Entry point
