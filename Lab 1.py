@@ -103,6 +103,7 @@ class GeneticAlgorithm:
         self.max_iter = max_iter
         self.elite_rate = elite_rate
         self.mutation_rate = mutation_rate
+        self.use_aging = True  # or False if you want to toggle it
 
         # Added for section 6
         self.use_crossover = use_crossover  # New parameter to enable/disable crossover
@@ -119,6 +120,7 @@ class GeneticAlgorithm:
         self.entropy_history = []
 
         # For Section 10 - Parent Selection
+        self.max_age = 10  # You can make this a parameter
         self.aging_factor=0.5
         self.selection_method = selection_method  # Use the passed parameter
         self.k = k  # Tournament selection size
@@ -204,13 +206,19 @@ class GeneticAlgorithm:
         return fitness
 
     def calc_fitness(self, population):
-        """Calculate fitness for all individuals using the selected method"""
+        """Calculate raw and adjusted fitness for all individuals"""
         for individual in population:
+            # Calculate raw fitness
             if self.fitness_type == "ORIGINAL":
                 individual.fitness = self.original_fitness(individual.chromosome, self.target)
             elif self.fitness_type == "LCS":
                 individual.fitness = self.lcs_fitness(individual.chromosome, self.target, self.lcs_bonus)
 
+            # Apply aging penalty
+            if self.use_aging:
+                individual.adjusted_fitness = individual.fitness + individual.age * self.aging_factor
+            else:
+                individual.adjusted_fitness = individual.fitness
 
     def sort_by_fitness(self, population):
         """Sort the population by fitness (ascending)"""
@@ -242,10 +250,14 @@ class GeneticAlgorithm:
     def mate(self, population, buffer):
 
         """Mate individuals to create the next generation with flexible selection"""
-        fitness_values = [ind.fitness for ind in population]
+        fitness_values = [ind.adjusted_fitness for ind in population]
+
 
         for ind in population:
             ind.age+=1
+        #use aging to remove old genes
+        population = [ind for ind in population if ind.age <= self.max_age]
+
         if self.use_elitism:
             esize = int(self.pop_size * self.elite_rate)
             self.elitism(population, buffer, esize)
@@ -304,6 +316,8 @@ class GeneticAlgorithm:
 
             buffer[i].chromosome = child1
             buffer[i + 1].chromosome = child2
+            buffer[i].age = 0
+            buffer[i + 1].age = 0
 
             # Mutation
             if self.use_mutation and random.random() < self.mutation_rate:
@@ -820,7 +834,7 @@ def main():
     # Configuration 3: Both Crossover and Mutation
     #ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True)
 
-    ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True, fitness_type="ORIGINAL",selection_methods="SUS", use_elitism=True)
+    ga = GeneticAlgorithm(crossover_type="SINGLE", use_crossover=True, use_mutation=True, fitness_type="ORIGINAL",selection_method="SUS", use_elitism=True)
     #ga = GeneticAlgorithm(crossover_type="TWO", use_crossover=True, use_mutation=True, fitness_type="LCS", lcs_bonus=5)
 
     best_solution, generations = ga.run()
